@@ -1,8 +1,8 @@
- 'use client'
+'use client'
 
- import { useEffect, useMemo, useRef, useState } from 'react'
- import { Mic, MicOff, Volume2, Loader2 } from 'lucide-react'
- import { speak, startListening } from '@/lib/speech'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Mic, MicOff, Volume2, Loader2, AlertTriangle } from 'lucide-react'
+import { speak, startListening, stopSpeaking } from '@/lib/speech'
  import type { Answer, Difficulty, EvaluationResult, InterviewRole, Question } from '@/types'
 
  type Status = 'loading' | 'speaking' | 'listening' | 'processing' | 'done'
@@ -38,11 +38,14 @@
    const [answers, setAnswers] = useState<Answer[]>([])
    const [status, setStatus] = useState<Status>('loading')
    const [error, setError] = useState<string | null>(null)
+  const [sttSupported, setSttSupported] = useState(true)
+  const [micPermission, setMicPermission] = useState<'unknown' | 'granted' | 'denied'>('unknown')
 
    const transcriptRef = useRef('')
    const answersRef = useRef<Answer[]>([])
    const stopListeningRef = useRef<null | (() => void)>(null)
    const finalizeRef = useRef(false)
+  const listeningQuestionIdRef = useRef<number | null>(null)
 
    const totalQuestions = questions.length
    const currentQuestion = useMemo(
@@ -52,12 +55,54 @@
 
    const progressPct = useMemo(() => {
      if (totalQuestions === 0) return 0
-     const completed = Math.min(currentQuestionIndex, totalQuestions)
-     return (completed / totalQuestions) * 100
-   }, [currentQuestionIndex, totalQuestions])
+    const completedCount =
+      status === 'processing' || status === 'done' ? currentQuestionIndex + 1 : currentQuestionIndex
+    const completed = Math.min(completedCount, totalQuestions)
+    return (completed / totalQuestions) * 100
+  }, [currentQuestionIndex, status, totalQuestions])
+
+  useEffect(() => {
+    const supported =
+      typeof window !== 'undefined' &&
+      (!!window.SpeechRecognition || !!window.webkitSpeechRecognition)
+    setSttSupported(supported)
+  }, [])
+
+  // Request microphone access on mount so we can fail fast with a clear message.
+  useEffect(() => {
+    let cancelled = false
+
+    async function checkMic() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Your browser does not support microphone access.')
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        stream.getTracks().forEach((t) => t.stop())
+        if (!cancelled) setMicPermission('granted')
+      } catch (e) {
+        console.error('[InterviewRoom] microphone permission failed', e)
+        if (cancelled) return
+        setMicPermission('denied')
+        setError(
+          'Microphone permission was denied. Please enable microphone access in your browser settings, then refresh and try again.'
+        )
+        setStatus('done')
+        stopSpeaking()
+      }
+    }
+
+    checkMic()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
    useEffect(() => {
      let cancelled = false
+    if (micPermission !== 'granted') return
 
      async function loadQuestions() {
        setError(null)
@@ -100,7 +145,7 @@
      return () => {
        cancelled = true
      }
-   }, [role, difficulty])
+  }, [role, difficulty, micPermission])
 
    // Speak the current question when we're in "speaking".
    useEffect(() => {
@@ -114,19 +159,40 @@
        // ignore
      }
      stopListeningRef.current = null
-     finalizeRef.current = false
+    listeningQuestionIdRef.current = null
      transcriptRef.current = ''
      setTranscript('')
 
      speak(currentQuestion.text, () => {
-       setStatus('listening')
+      if (micPermission !== 'granted') {
+        setError(
+          'Microphone permission was not granted. Please enable it and restart the interview.'
+        )
+        setStatus('done')
+        return
+      }
+      setStatus('listening')
      })
-   }, [currentQuestion, status])
+  }, [currentQuestion, status, micPermission])
 
    // Start STT while in "listening".
    useEffect(() => {
      if (status !== 'listening') return
      if (!currentQuestion) return
+    if (sttSupported === false) {
+      setError(
+        'Speech recognition is not supported in this browser. Please use Chrome for the best results.'
+      )
+      setStatus('done')
+      return
+    }
+    if (micPermission !== 'granted') {
+      setError(
+        'Microphone permission was not granted. Please enable it and restart the interview.'
+      )
+      setStatus('done')
+      return
+    }
 
      try {
        stopListeningRef.current?.()
@@ -134,14 +200,18 @@
        // ignore
      }
 
-     const stop = startListening(
+    const qId = currentQuestion.id
+    listeningQuestionIdRef.current = qId
+    finalizeRef.current = false
+
+    const stop = startListening(
        (text) => {
          transcriptRef.current = text
          setTranscript(text)
        },
        () => {
          // Recognition ended (silence or manual stop).
-         void finalizeCurrentAnswer()
+        void finalizeCurrentAnswer(qId)
        }
      )
 
@@ -155,60 +225,86 @@
        stopListeningRef.current = null
      }
      // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [status, currentQuestionIndex])
+  }, [status, currentQuestionIndex, currentQuestion, micPermission, sttSupported])
 
-   async function finalizeCurrentAnswer() {
-     const q = currentQuestion
-     if (!q) return
-     if (finalizeRef.current) return
-     finalizeRef.current = true
+  const finalizeCurrentAnswer = useCallback(
+    async (forQuestionId: number) => {
+      if (listeningQuestionIdRef.current !== forQuestionId) return
 
-     // Ensure STT is fully stopped before moving on.
-     try {
-       stopListeningRef.current?.()
-     } catch {
-       // ignore
-     }
-     stopListeningRef.current = null
+      const q = questions.find((qq) => qq.id === forQuestionId)
+      if (!q) return
+      if (finalizeRef.current) return
+      finalizeRef.current = true
+      listeningQuestionIdRef.current = null
 
-     const answerText = transcriptRef.current.trim()
-     const nextAnswers = [...answersRef.current, { questionId: q.id, questionText: q.text, answerText }]
-     answersRef.current = nextAnswers
-     setAnswers(nextAnswers)
+      // Ensure STT is fully stopped before moving on.
+      try {
+        stopListeningRef.current?.()
+      } catch {
+        // ignore
+      }
+      stopListeningRef.current = null
 
-     const nextIndex = currentQuestionIndex + 1
-     if (nextIndex < questions.length) {
-       setCurrentQuestionIndex(nextIndex)
-       setStatus('speaking')
-       return
-     }
+      const answerText = transcriptRef.current.trim()
+      const nextAnswers = [
+        ...answersRef.current,
+        { questionId: q.id, questionText: q.text, answerText },
+      ]
+      answersRef.current = nextAnswers
+      setAnswers(nextAnswers)
 
-     // Last question: evaluate.
-     setStatus('processing')
-     try {
-       const res = await fetch('/api/evaluate', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ role, difficulty, answers: nextAnswers }),
-       })
+      const qIndex = questions.findIndex((qq) => qq.id === forQuestionId)
+      const nextIndex = (qIndex >= 0 ? qIndex : currentQuestionIndex) + 1
+      if (nextIndex < questions.length) {
+        setCurrentQuestionIndex(nextIndex)
+        setStatus('speaking')
+        return
+      }
 
-       if (!res.ok) {
-         throw new Error(`Failed to evaluate (HTTP ${res.status})`)
-       }
+      // Last question: evaluate.
+      setStatus('processing')
+      try {
+        const res = await fetch('/api/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role, difficulty, answers: nextAnswers }),
+        })
 
-       const result = (await res.json()) as EvaluationResult
-       onComplete(result)
-       setStatus('done')
-     } catch (e) {
-       console.error('[InterviewRoom] evaluation failed', e)
-       setError(e instanceof Error ? e.message : 'Failed to generate feedback')
-       setStatus('done')
-     }
-   }
+        if (!res.ok) {
+          throw new Error(`Failed to evaluate (HTTP ${res.status})`)
+        }
+
+        const result = (await res.json()) as EvaluationResult
+        onComplete(result)
+        setStatus('done')
+      } catch (e) {
+        console.error('[InterviewRoom] evaluation failed', e)
+        setError(e instanceof Error ? e.message : 'Failed to generate feedback')
+        setStatus('done')
+      }
+    },
+    [currentQuestionIndex, difficulty, onComplete, questions, role]
+  )
 
    const handleDoneAnswering = () => {
-     void finalizeCurrentAnswer()
+    if (!currentQuestion) return
+    void finalizeCurrentAnswer(currentQuestion.id)
    }
+
+  // Space bar = stop listening (same as Done Answering)
+  useEffect(() => {
+    if (status !== 'listening') return
+    if (!currentQuestion) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      e.preventDefault()
+      void finalizeCurrentAnswer(currentQuestion.id)
+    }
+
+    window.addEventListener('keydown', onKeyDown, { passive: false })
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [status, currentQuestion, finalizeCurrentAnswer])
 
    const isSpeaking = status === 'speaking'
    const isListening = status === 'listening'
@@ -217,6 +313,20 @@
    return (
      <div className="w-full">
        <div className="mb-6">
+        {!sttSupported ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-amber-900">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-5 w-5 mt-0.5" />
+              <div>
+                <div className="font-semibold">Browser note</div>
+                <div className="text-sm mt-1">
+                  MockMate works best in Chrome. Some features may not work in other browsers.
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
          <div className="flex items-center justify-between text-sm text-slate-600">
            <span className="font-medium">
              {totalQuestions ? `Question ${currentQuestionIndex + 1} of ${totalQuestions}` : 'Preparing interview...'}
@@ -239,7 +349,12 @@
        ) : null}
 
        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-         {status === 'loading' ? (
+        {micPermission !== 'granted' ? (
+          <div className="flex items-center gap-3 text-slate-700">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span>{micPermission === 'denied' ? 'Microphone access needed' : 'Checking microphone permission...'}</span>
+          </div>
+        ) : status === 'loading' ? (
            <div className="flex items-center gap-3 text-slate-700">
              <Loader2 className="h-5 w-5 animate-spin" />
              <span>Loading questions...</span>
@@ -254,6 +369,11 @@
                  <div className="text-lg font-semibold text-slate-900 mt-1">
                    {currentQuestion.text}
                  </div>
+                {totalQuestions ? (
+                  <div className="text-xs text-slate-500 mt-2">
+                    Answers saved: {answers.length} / {totalQuestions}
+                  </div>
+                ) : null}
                </div>
 
                <div className="shrink-0 flex items-center gap-3">
