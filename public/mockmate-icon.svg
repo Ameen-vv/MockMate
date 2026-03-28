@@ -1,0 +1,29 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" rx="120" fill="#1a1a2e"/>
+
+  <!-- Sound wave rings -->
+  <circle cx="256" cy="220" r="200" fill="none" stroke="#6c63ff" stroke-width="6" opacity="0.3"/>
+  <circle cx="256" cy="220" r="160" fill="none" stroke="#6c63ff" stroke-width="6" opacity="0.4"/>
+
+  <!-- Mic body -->
+  <rect x="196" y="80" width="120" height="200" rx="60" fill="#6c63ff"/>
+
+  <!-- Mic grille lines -->
+  <line x1="196" y1="150" x2="316" y2="150" stroke="white" stroke-width="6" opacity="0.4"/>
+  <line x1="196" y1="180" x2="316" y2="180" stroke="white" stroke-width="6" opacity="0.4"/>
+  <line x1="196" y1="210" x2="316" y2="210" stroke="white" stroke-width="6" opacity="0.4"/>
+
+  <!-- Mic stand arc -->
+  <path d="M140 250 Q140 360 256 360 Q372 360 372 250" fill="none" stroke="#a78bfa" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- Mic stand vertical -->
+  <line x1="256" y1="360" x2="256" y2="420" stroke="#a78bfa" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- Mic stand base -->
+  <line x1="180" y1="420" x2="332" y2="420" stroke="#a78bfa" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- Active indicator dot -->
+  <circle cx="370" cy="100" r="32" fill="#22c55e"/>
+  <circle cx="370" cy="100" r="16" fill="white"/>
+</svg>

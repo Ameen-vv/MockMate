@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { Difficulty, EvaluationResult, InterviewRole } from '@/types'
-import { Mic } from 'lucide-react'
+import Image from 'next/image'
 import RoleSelector from '@/components/RoleSelector'
 import InterviewRoom from '@/components/InterviewRoom'
 import Feedback from '@/components/Feedback'
@@ -38,9 +38,14 @@ export default function Home() {
     <div className="min-h-screen bg-zinc-50 font-sans dark:bg-black">
       <div className="w-full max-w-3xl mx-auto px-4 py-10 flex flex-col gap-6">
         <header className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center">
-            <Mic className="h-5 w-5" />
-          </div>
+          <Image
+            src="/mockmate-icon.svg"
+            alt="MockMate"
+            width={44}
+            height={44}
+            className="h-11 w-11 rounded-2xl shrink-0"
+            priority
+          />
           <div className="leading-tight">
             <div className="text-xl font-bold text-slate-900 dark:text-white">MockMate</div>
             <div className="text-sm text-slate-600 dark:text-slate-300">AI-powered interview practice</div>

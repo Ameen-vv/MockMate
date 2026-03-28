@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'MockMate',
   description: 'AI Voice Interview Practice',
+  icons: {
+    icon: [{ url: '/mockmate-icon.svg', type: 'image/svg+xml' }],
+    apple: '/mockmate-icon.svg',
+    shortcut: '/mockmate-icon.svg',
+  },
 }
 
 export default function RootLayout({
