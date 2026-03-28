@@ -204,16 +204,12 @@ import { speak, startListening, stopSpeaking } from '@/lib/speech'
     listeningQuestionIdRef.current = qId
     finalizeRef.current = false
 
-    const stop = startListening(
-       (text) => {
-         transcriptRef.current = text
-         setTranscript(text)
-       },
-       () => {
-         // Recognition ended (silence or manual stop).
-        void finalizeCurrentAnswer(qId)
-       }
-     )
+    // Do not advance on STT `onend` — pauses/silence used to finalize too early.
+    // User must use "Done Answering" or Space. Stop() runs onEnd when we abort.
+    const stop = startListening((text) => {
+      transcriptRef.current = text
+      setTranscript(text)
+    })
 
      stopListeningRef.current = stop
      return () => {
